@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Serverless Chat</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-slate-100 to-slate-50 min-h-screen flex items-center justify-center p-6">
+
+  <div class="w-full max-w-2xl bg-white shadow-2xl rounded-2xl overflow-hidden flex flex-col">
+    <!-- Header -->
+    <header class="bg-gradient-to-r from-indigo-600 to-violet-600 text-white p-4 flex items-center justify-between">
+      <h1 class="text-lg font-semibold">Serverless Chat</h1>
+      <div class="text-sm opacity-80">Real-time using API Gateway WebSocket</div>
+    </header>
+
+    <!-- Chat area -->
+    <main id="chat" class="flex-1 p-6 space-y-4 overflow-y-auto bg-slate-50 h-[60vh]">
+      <!-- messages appended here -->
+    </main>
+
+    <!-- Input area -->
+    <footer class="p-4 border-t bg-white">
+      <div class="flex gap-3 items-start">
+        <input id="username" type="text" placeholder="Your name" class="w-40 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+        <div class="flex-1">
+          <textarea id="message" rows="2" placeholder="Write a message..." class="w-full px-3 py-2 rounded-lg border border-gray-200 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"></textarea>
+        </div>
+        <div class="flex flex-col gap-2">
+          <button id="sendBtn" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition">Send</button>
+          <button id="emojiBtn" class="bg-white border border-gray-200 px-3 py-2 rounded-lg">😊</button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+<script>
+/* === CONFIG — replace with your API GW websocket URL === */
+const WS_URL = "wss://Replace ur websocket api.amazonaws.com/onepiece/";
+
+/* === Helpers === */
+function formatTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/* === WebSocket Setup === */
+const ws = new WebSocket(WS_URL);
+const chat = document.getElementById('chat');
+const usernameInput = document.getElementById('username');
+const messageInput = document.getElementById('message');
+const sendBtn = document.getElementById('sendBtn');
+const emojiBtn = document.getElementById('emojiBtn');
+
+ws.onopen = () => {
+  console.log('Connected to WebSocket');
+  addSystemMessage('Connected to chat server');
+};
+
+ws.onclose = () => {
+  addSystemMessage('Disconnected from chat server');
+};
+
+ws.onerror = (e) => {
+  console.error('WebSocket error', e);
+  addSystemMessage('WebSocket error');
+};
+
+ws.onmessage = (evt) => {
+  try {
+    const data = JSON.parse(evt.data);
+    const me = (usernameInput.value || 'Anonymous').trim();
+    // Avoid showing the same message twice
+    if (data.sender !== me) {
+      addMessage(data.sender || 'Anonymous', data.message, data.timestamp || Date.now());
+    }
+  } catch (err) {
+    console.warn('Invalid message', evt.data);
+  }
+};
+
+/* === UI render helpers === */
+function addSystemMessage(text) {
+  const div = document.createElement('div');
+  div.className = 'text-sm text-center text-gray-500';
+  div.textContent = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function addMessage(sender, message, timestamp) {
+  const me = (usernameInput.value || 'Anonymous').trim();
+  const isMe = sender === me;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = `flex ${isMe ? 'justify-end' : 'justify-start'}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = (isMe ? 'bg-indigo-600 text-white' : 'bg-white border') + 
+    ' max-w-[75%] p-3 rounded-2xl shadow-sm';
+
+  const header = document.createElement('div');
+  header.className = 'flex items-baseline gap-2 mb-1 text-xs opacity-80';
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'font-semibold ' + (isMe ? 'text-indigo-100' : 'text-indigo-600');
+  nameSpan.textContent = sender;
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'ml-1 text-xs text-gray-400';
+  timeSpan.textContent = formatTime(timestamp);
+  header.appendChild(nameSpan);
+  header.appendChild(timeSpan);
+
+  const msgText = document.createElement('div');
+  msgText.className = 'whitespace-pre-wrap break-words';
+  msgText.innerHTML = escapeHtml(message);
+
+  bubble.appendChild(header);
+  bubble.appendChild(msgText);
+  wrapper.appendChild(bubble);
+  chat.appendChild(wrapper);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function escapeHtml(unsafe) {
+  return unsafe
+    .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+    .replaceAll('"','&quot;').replaceAll("'",'&#039;');
+}
+
+/* === Sending messages === */
+function sendMessage() {
+  const raw = messageInput.value.trim();
+  if (!raw) return;
+  const sender = usernameInput.value.trim() || 'Anonymous';
+
+  const payload = {
+    action: 'sendMessage',
+    sender,
+    message: raw,
+    timestamp: Date.now()
+  };
+
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload));
+    // Show local message once
+    addMessage(sender, raw, payload.timestamp);
+    messageInput.value = '';
+  } else {
+    addSystemMessage('Not connected. Message not sent.');
+  }
+}
+
+sendBtn.addEventListener('click', sendMessage);
+messageInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+emojiBtn.addEventListener('click', () => {
+  const emoji = '😊';
+  messageInput.value = messageInput.value + emoji;
+  messageInput.focus();
+});
+</script>
+
+</body>
+</html>
+
